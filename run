@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+TEST_OUT = Path("output/testing")
+
+# ##################################################################
+# run command
+# executes a shell command and returns exit code
+def _run(cmd: list[str]) -> int:
+    return subprocess.call(cmd)
+
+# ##################################################################
+# command test
+# runs pytest on a specific test target and logs output
+def command_test(args: argparse.Namespace) -> int:
+    TEST_OUT.mkdir(parents=True, exist_ok=True)
+    target = args.target
+    rc = _run(["pytest", "-q", target, "--maxfail=1", "--disable-warnings"])
+    return rc
+
+# ##################################################################
+# command lint
+# runs ruff linter on the codebase
+def command_lint(_: argparse.Namespace) -> int:
+    return _run(["ruff", "check", "--line-length", "120", "src/", "run"])
+
+# ##################################################################
+# command serve
+# starts the ollama api server on specified port
+def command_serve(args: argparse.Namespace) -> int:
+    port = args.port
+    return _run([sys.executable, "-m", "src.server", "--port", str(port)])
+
+# ##################################################################
+# command check
+# runs dazpycheck for full test suite linter and final gate
+def command_check(_: argparse.Namespace) -> int:
+    return _run(["dazpycheck"])
+
+# ##################################################################
+# main
+# parses arguments and dispatches to appropriate command handler
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_test = sub.add_parser("test", help="Run a single test target")
+    p_test.add_argument("target", help="e.g. src/models_test.py::test_list_models")
+    p_test.set_defaults(func=command_test)
+
+    p_lint = sub.add_parser("lint", help="Run linter")
+    p_lint.set_defaults(func=command_lint)
+
+    p_serve = sub.add_parser("serve", help="Start the Ollama API server")
+    p_serve.add_argument("--port", type=int, default=11345, help="Port to listen on (default: 11345)")
+    p_serve.set_defaults(func=command_serve)
+
+    p_check = sub.add_parser("check", help="Run full test suite and linter")
+    p_check.set_defaults(func=command_check)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+# ##################################################################
+# entry point
+# standard python pattern for dispatching main
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
