@@ -35,6 +35,13 @@ def command_serve(args: argparse.Namespace) -> int:
     return _run([sys.executable, "-m", "src.server", "--port", str(port)])
 
 # ##################################################################
+# command serve openai
+# starts the openai v1 api server on specified port plus one
+def command_serve_openai(args: argparse.Namespace) -> int:
+    port = args.port + 1
+    return _run([sys.executable, "-m", "src.openai_server", "--port", str(port)])
+
+# ##################################################################
 # command check
 # runs dazpycheck for full test suite linter and final gate
 def command_check(_: argparse.Namespace) -> int:
@@ -57,6 +64,10 @@ def main(argv: list[str]) -> int:
     p_serve = sub.add_parser("serve", help="Start the Ollama API server")
     p_serve.add_argument("--port", type=int, default=11345, help="Port to listen on (default: 11345)")
     p_serve.set_defaults(func=command_serve)
+
+    p_serve_openai = sub.add_parser("serve-openai", help="Start the OpenAI v1 API server")
+    p_serve_openai.add_argument("--port", type=int, default=11345, help="Base port (OpenAI runs on port+1, default: 11346)")
+    p_serve_openai.set_defaults(func=command_serve_openai)
 
     p_check = sub.add_parser("check", help="Run full test suite and linter")
     p_check.set_defaults(func=command_check)

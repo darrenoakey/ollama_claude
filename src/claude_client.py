@@ -8,6 +8,18 @@ logger = get_logger(__name__)
 
 
 # ##################################################################
+# extract json from delimited response
+# pulls json content from triple backtick delimiters in response text
+def extract_json_from_response(response_text: str) -> str:
+    import re
+    json_pattern = r'```(?:json)?\s*\n?(.*?)\n?```'
+    match = re.search(json_pattern, response_text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return response_text.strip()
+
+
+# ##################################################################
 # messages to prompt
 # converts ollama messages format to a single prompt string
 def messages_to_prompt(messages: list[dict[str, Any]]) -> tuple[str, str]:
@@ -35,16 +47,41 @@ def messages_to_prompt(messages: list[dict[str, Any]]) -> tuple[str, str]:
 # chat completion memoized
 # memoized actual api call to avoid repeated expensive llm calls in tests
 @lru_cache(maxsize=256)
-def chat_completion_memoized(prompt: str, system_text: str) -> str:
-    logger.info(f"Claude API call - prompt_len={len(prompt)} system_len={len(system_text)}")
+def chat_completion_memoized(prompt: str, system_text: str, json_schema_str: str | None = None) -> str:
+    logger.info(f"Claude API call - prompt_len={len(prompt)} system_len={len(system_text)} schema={json_schema_str is not None}")
+
+    actual_prompt = prompt
+    actual_system = system_text
+
+    if json_schema_str:
+        import json
+        schema_dict = json.loads(json_schema_str)
+        schema_json = json.dumps(schema_dict.get("schema", schema_dict), indent=2)
+
+        json_instruction = f"""
+You must respond with valid JSON that exactly matches this schema. Wrap your JSON response in triple backticks like this:
+
+```json
+{{...your json here...}}
+```
+
+Schema:
+{schema_json}
+
+Your entire response must be the JSON wrapped in ```json and ```. Do not include any other text.
+"""
+        if actual_system:
+            actual_system = actual_system + "\n\n" + json_instruction
+        else:
+            actual_system = json_instruction
 
     async def _query() -> str:
         options = ClaudeAgentOptions(max_turns=1)
-        if system_text:
-            options.system_prompt = system_text
+        if actual_system:
+            options.system_prompt = actual_system
 
         result_text = ""
-        async for message in query(prompt=prompt, options=options):
+        async for message in query(prompt=actual_prompt, options=options):
             if isinstance(message, AssistantMessage):
                 for block in message.content:
                     if isinstance(block, TextBlock):
@@ -65,7 +102,18 @@ def chat_completion(messages: list[dict[str, Any]], model: str, structured_forma
         raise ValueError("No messages provided")
 
     prompt, system_text = messages_to_prompt(messages)
-    return chat_completion_memoized(prompt, system_text)
+
+    json_schema_str = None
+    if structured_format:
+        import json
+        json_schema_str = json.dumps(structured_format)
+
+    response = chat_completion_memoized(prompt, system_text, json_schema_str)
+
+    if json_schema_str:
+        response = extract_json_from_response(response)
+
+    return response
 
 
 # ##################################################################

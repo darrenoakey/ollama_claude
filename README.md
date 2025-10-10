@@ -10,6 +10,7 @@ This proxy enables you to:
 - Use Claude models with any application that supports Ollama
 - Leverage Claude's capabilities through the familiar Ollama API
 - Maintain compatibility with existing Ollama-based workflows and tools
+- Access Claude through OpenAI-compatible API endpoints with full JSON schema support
 
 ## Installation
 
@@ -25,17 +26,27 @@ pip install -r requirements.txt
 
 ### Starting the Server
 
-Start the server on the default port (11345):
+Start the Ollama API server on the default port (11345):
 ```bash
 ./run serve
 ```
 
-Start the server on a custom port:
+Start the OpenAI v1 API server on the default port (11346):
+```bash
+./run serve-openai
+```
+
+Start the Ollama server on a custom port:
 ```bash
 ./run serve --port 8080
 ```
 
-The server will listen on all network interfaces (0.0.0.0) by default.
+Start the OpenAI server on a custom port (default is base port + 1):
+```bash
+./run serve-openai --port 8080  # OpenAI server will run on 8081
+```
+
+The servers will listen on all network interfaces (0.0.0.0) by default.
 
 ### Using with Ollama Clients
 
@@ -99,15 +110,153 @@ export OLLAMA_HOST=http://localhost:11345
 ollama run claude "What is the capital of France?"
 ```
 
+### Using with OpenAI-Compatible Clients
+
+The server also provides an OpenAI v1 API endpoint with full JSON schema support:
+
+**Using the OpenAI Python library:**
+```python
+from openai import OpenAI
+
+# Configure client to use the proxy
+client = OpenAI(
+    base_url="http://localhost:11346/v1",
+    api_key="dummy"  # API key not used, but required by the library
+)
+
+# Chat completion
+response = client.chat.completions.create(
+    model="claude",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+print(response.choices[0].message.content)
+
+# Chat completion with JSON schema
+response = client.chat.completions.create(
+    model="claude",
+    messages=[{"role": "user", "content": "What is 2+2?"}],
+    response_format={
+        "type": "json_schema",
+        "json_schema": {
+            "name": "math_answer",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "answer": {"type": "string"},
+                    "confidence": {"type": "number"}
+                },
+                "required": ["answer", "confidence"],
+                "additionalProperties": False
+            }
+        }
+    }
+)
+print(response.choices[0].message.content)  # Returns valid JSON matching schema
+```
+
+**Using curl:**
+```bash
+# List models
+curl http://localhost:11346/v1/models
+
+# Chat completion
+curl http://localhost:11346/v1/chat/completions -H "Content-Type: application/json" -d '{
+  "model": "claude",
+  "messages": [{"role": "user", "content": "Hello!"}]
+}'
+
+# Streaming chat
+curl http://localhost:11346/v1/chat/completions -H "Content-Type: application/json" -d '{
+  "model": "claude",
+  "messages": [{"role": "user", "content": "Hello!"}],
+  "stream": true
+}'
+
+# Chat with JSON schema
+curl http://localhost:11346/v1/chat/completions -H "Content-Type: application/json" -d '{
+  "model": "claude",
+  "messages": [{"role": "user", "content": "What is 2+2?"}],
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "math_answer",
+      "strict": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "answer": {"type": "string"},
+          "confidence": {"type": "number"}
+        },
+        "required": ["answer", "confidence"],
+        "additionalProperties": false
+      }
+    }
+  }
+}'
+```
+
 ## API Endpoints
 
-The proxy implements these Ollama API endpoints:
+### Ollama API Endpoints
 
 - `GET /api/tags` - Lists available models (returns "claude")
 - `POST /api/chat` - Chat completions with conversation history
 - `POST /api/generate` - Single-turn text generation
 
 Both chat and generate endpoints support streaming responses via the `stream` parameter.
+
+### OpenAI v1 API Endpoints
+
+- `GET /v1/models` - Lists available models
+- `POST /v1/chat/completions` - Chat completions with full JSON schema support
+
+The OpenAI endpoint supports the `response_format` parameter with JSON schema for structured output. All responses are guaranteed to serialize perfectly into the provided schema.
+
+## Integration Examples
+
+### Continue.dev (VS Code/JetBrains)
+
+Configure your `config.json` to point to the proxy:
+```json
+{
+  "models": [{
+    "title": "Claude via Proxy",
+    "provider": "ollama",
+    "model": "claude",
+    "apiBase": "http://localhost:11345"
+  }]
+}
+```
+
+### Open WebUI
+
+Set the Ollama API URL to `http://localhost:11345` in settings.
+
+### LangChain
+
+```python
+from langchain_community.llms import Ollama
+
+llm = Ollama(
+    base_url='http://localhost:11345',
+    model='claude'
+)
+response = llm.invoke("What is machine learning?")
+```
+
+### LiteLLM
+
+```python
+from litellm import completion
+
+response = completion(
+    model="openai/claude",
+    api_base="http://localhost:11346/v1",
+    api_key="dummy",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
 
 ## Development
 
@@ -138,36 +287,3 @@ Run the linter:
 ### Logs
 
 Server logs are written to `output/server.log` and include detailed request/response information for debugging.
-
-## Examples
-
-### Integration with Existing Tools
-
-Any tool that supports Ollama can use this proxy. For example:
-
-**Continue.dev (VS Code/JetBrains):**
-Configure your `config.json` to point to the proxy:
-```json
-{
-  "models": [{
-    "title": "Claude via Proxy",
-    "provider": "ollama",
-    "model": "claude",
-    "apiBase": "http://localhost:11345"
-  }]
-}
-```
-
-**Open WebUI:**
-Set the Ollama API URL to `http://localhost:11345` in settings.
-
-**LangChain:**
-```python
-from langchain_community.llms import Ollama
-
-llm = Ollama(
-    base_url='http://localhost:11345',
-    model='claude'
-)
-response = llm.invoke("What is machine learning?")
-```
